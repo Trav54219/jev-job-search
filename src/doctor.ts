@@ -147,7 +147,7 @@ export async function checkClaudeOnline(): Promise<Check> {
     }
   }
   const fix = "Run `claude` once in a terminal and sign in";
-  const r = spawnSync(WRITER.command, ["-p", "--model", WRITER.model, "--output-format", "json", "--tools", "", "--no-session-persistence", "--strict-mcp-config", "--system-prompt", "Reply with the single word ok."], { input: "ok?", encoding: "utf8", timeout: DOCTOR.claudeTimeoutMs, env: childEnv(WRITER.env) });
+  const r = spawnSync(WRITER.command, ["-p", "--model", WRITER.model, "--output-format", "json", "--tools", "", "--no-session-persistence", "--strict-mcp-config", "--system-prompt", "Reply with the single word ok."], { input: "ok?", encoding: "utf8", timeout: DOCTOR.claudeTimeoutMs, env: childEnv({ ...WRITER.env, ...(process.env.CLAUDE_CODE_OAUTH_TOKEN ? { CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN } : {}) }) });
   try {
     const envelope = JSON.parse(r.stdout) as { is_error?: boolean; result?: string };
     const ok = r.status === 0 && !envelope.is_error;

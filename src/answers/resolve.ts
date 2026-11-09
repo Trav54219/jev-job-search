@@ -224,7 +224,7 @@ function callWriter(prompt: string, system: string, meta: { purpose: WriterCall[
     const child = spawn(
       WRITER.command,
       ["-p", "--model", WRITER.model, "--effort", effortFor(meta.purpose), "--output-format", "json", "--tools", "", "--no-session-persistence", "--strict-mcp-config", "--system-prompt", system],
-      { stdio: ["pipe", "pipe", "pipe"], cwd: WRITER.cwd, env: childEnv(WRITER.env) },
+      { stdio: ["pipe", "pipe", "pipe"], cwd: WRITER.cwd, env: childEnv({ ...WRITER.env, ...writerLogin() }) },
     );
     let out = "";
     let err = "";
@@ -252,6 +252,16 @@ function callWriter(prompt: string, system: string, meta: { purpose: WriterCall[
     });
     child.stdin.end(prompt);
   });
+}
+
+/**
+ * The writer's own sign-in, handed only to the writer: on a cloud machine with no Keychain, Claude Code
+ * reads its subscription token from CLAUDE_CODE_OAUTH_TOKEN (made with `claude setup-token`). Every
+ * other child process still gets no key.
+ */
+function writerLogin(): Record<string, string> {
+  const token = (process.env.CLAUDE_CODE_OAUTH_TOKEN ?? "").trim();
+  return token ? { CLAUDE_CODE_OAUTH_TOKEN: token } : {};
 }
 
 /** One plain writer call with a system prompt, for checks. Recorded like any other call. */
