@@ -37,7 +37,7 @@ const SYSTEM = [
   "- text and textarea: write in the candidate's voice, following the voice rules exactly, inside maxLength. Match the length to the question: one line for a one-line box, 60 to 140 words for an open question unless it asks for more or less.",
   "- A checkbox or radio option comes with its question. Decide the whole group together from the question: tick the options that are true for the candidate, and for a yes/no pair tick exactly one.",
   "- A group of checkboxes where none applies: tick \"None of the above\" only if the facts settle every item in the group, otherwise tick \"I prefer not to answer\" when that exists.",
-  "- Salary: use the standing wording unless a number is forced, which is needs_review.",
+  "- Salary: when the posting states a pay range, answer with that range (a single number box gets its midpoint). Otherwise use the profile's salaryExpectation.",
   "- Answer what is asked and no more. Sponsorship, visa status, GPA and anything else that counts against the candidate are stated truthfully wherever a field asks for them, and are not volunteered in free text that did not ask.",
   "- An optional field gets a value whenever the facts give a true one. Leave it out of answers only when nothing true applies to it.",
   "- A field listed with a reason like \"the page did not keep the value\" needs the value in the format the field wants (for a date box, a real date such as 2027-05-03 or 05/03/2027 as the hint or placeholder shows).",

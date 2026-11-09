@@ -521,8 +521,8 @@ export function planField(f: DumpedField, answer: Answer | undefined, profile: P
   const note = a.confidence < FORM.autoConfidence ? `confidence ${a.confidence.toFixed(2)}` : null;
   const textLike = f.kind === "text" || f.kind === "textarea";
   // A salary box that will not submit empty gets the profile's standing wording, never a number the candidate did not give.
-  if (f.required && textLike && SALARY_LABEL.test(f.label) && !profile.preferences.salaryExpectation && (key === "salary_expectation" || key === "leave_blank" || key === "unknown" || key === "free_text")) {
-    return { ...base, action: "fill", key: "salary_expectation", value: profile.preferences.salaryIfRequired, confidence: a.confidence, note: "salary is required, so the standing wording is used" };
+  if (f.required && textLike && SALARY_LABEL.test(f.label) && (key === "salary_expectation" || key === "leave_blank" || key === "unknown" || key === "free_text")) {
+    return { ...base, action: "fill", key: "salary_expectation", value: salaryFor(profile, job) ?? profile.preferences.salaryIfRequired, confidence: a.confidence, note: postedPayRange(job.description ?? "") ? "the posting's own pay range" : "salary is required, so the standing expectation is used" };
   }
   if (a.confidence < FORM.reviewConfidence) {
     // An open question is drafted whatever the confidence: the writer reads the question itself, not JEV's guess at its intent.
@@ -588,9 +588,32 @@ function gpaValue(profile: Profile): string | null {
   return g?.cumulative !== undefined ? g.cumulative.toFixed(2) : null;
 }
 
+const PAY_AMOUNT = String.raw`\d{2,3}(?:,\d{3})+(?:\.\d{2})?|\d{2,3}(?:\.\d)?\s?[kK]\b`;
+const PAY_RANGE = new RegExp(String.raw`\$\s?(${PAY_AMOUNT})\s*(?:-|–|—|to)\s*(?:USD\s*)?\$?\s?(${PAY_AMOUNT})`);
+const payNumber = (s: string) => (/k$/i.test(s.trim()) ? parseFloat(s) * 1000 : parseFloat(s.replace(/,/g, "")));
+
+/** The yearly pay range a posting states ("$140,000 - $180,000", "$140K to $180K"), or null. */
+export function postedPayRange(text: string): { low: number; high: number } | null {
+  const m = PAY_RANGE.exec(text);
+  if (!m) return null;
+  const low = payNumber(m[1] as string);
+  const high = payNumber(m[2] as string);
+  return low >= 30_000 && high >= low && high < 1_000_000 ? { low, high } : null;
+}
+
+const usd = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
+
+/** What a salary box gets: the posting's own range when it states one, else the profile's standing expectation. */
+export function salaryFor(profile: Profile, job: Job): string | null {
+  const posted = postedPayRange(job.description ?? "");
+  if (posted) return `${usd(posted.low)} to ${usd(posted.high)}`;
+  return profile.preferences.salaryExpectation || null;
+}
+
 /** Profile value for a key, with the two job-dependent keys resolved against the posting's country. */
 export function valueForJob(profile: Profile, job: Job, key: FieldKey, label = ""): string | null {
   if (isSpecialKey(key)) return null;
+  if (key === "salary_expectation") return salaryFor(profile, job);
   if (key === "authorized_to_work" || key === "requires_sponsorship") {
     // The country is the one the question names, else the posting's. When neither says, the answer is the person's.
     const country = countryOf(label, job);
