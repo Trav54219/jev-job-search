@@ -3,7 +3,7 @@
  * might need (speculative fan-out). Code turns the typed answers into a
  * composite score, hard skips, and human-readable reasons.
  */
-import { FIT_WEIGHTS, GRADUATION_MISMATCH_MULTIPLIER, LOCATION_MULTIPLIER, RECENCY_FLOOR, DISCOVER, TARGET_LOCATION_MULTIPLIER, TARGET_OTHER_LEVEL_FIT } from "../config.js";
+import { JEV, FIT_WEIGHTS, GRADUATION_MISMATCH_MULTIPLIER, LOCATION_MULTIPLIER, RECENCY_FLOOR, DISCOVER, TARGET_LOCATION_MULTIPLIER, TARGET_OTHER_LEVEL_FIT } from "../config.js";
 import type { JevClient } from "../jev/client.js";
 import { choice, noul, score, scoreToUnit } from "../jev/questions.js";
 import type { Answer, ChoiceAnswer, NoulAnswer, Questions, ScoreAnswer } from "../jev/types.js";
@@ -129,7 +129,7 @@ export function buildFitState(job: Job, profile: Profile, now = new Date()): Rec
       posted_days_ago: age,
       terms_from_source: job.terms,
       sponsorship_flag_from_source: job.sponsorship,
-      description: job.description || "(no description available; judge from the title and company)",
+      description: job.description ? job.description.slice(0, JEV.rateDescriptionChars) : "(no description available; judge from the title and company)",
     },
     candidate: {
       summary: profile.summary,

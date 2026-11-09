@@ -121,6 +121,8 @@ export const JEV = {
   contextTokens: 32_000,
   /** Approximate budget for the job description inside a rating request (chars, ~4 chars per token). */
   maxDescriptionChars: 14_000,
+  /** How much of the posting a fit rating reads. The role, level and requirements come first; the rest (benefits, pay, legal text) does not change a rating and only costs tokens. The full text stays stored for the salary box and the writer. */
+  rateDescriptionChars: 6_000,
   /** Approximate budget for a page's text when deciding page state. */
   maxPageTextChars: 8_000,
   timeoutMs: 20_000,
