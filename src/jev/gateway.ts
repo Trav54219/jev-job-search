@@ -28,7 +28,7 @@ const SYSTEM = [
   "Use only what the STATE says. Never assume a fact about the candidate that the STATE does not give.",
   "Reply with one JSON object and nothing else. It has one key per question, the same keys you were given.",
   'For a "noul" question: {"p": <probability from 0 to 1 that the answer is true>}.',
-  'For a "choice" question: {"probabilities": {<every option key>: <probability>}}, summing to 1.',
+  'For a "choice" question: {"probabilities": {<option key>: <probability>}} listing ONLY the options above 0.02 (usually one to three), summing to about 1. Never list every option.',
   'For a "score" question: {"probabilities": {"0": <p>, "1": <p>, ...}} over the level indexes, lowest first, summing to 1.',
   "When the STATE does not settle a question, spread the probability; do not guess with certainty.",
 ].join("\n");

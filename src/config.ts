@@ -103,8 +103,8 @@ export const JEV_GATEWAY = {
   endpoint: "https://apis.opengateway.ai/v1/chat/completions",
   model: "anthropic/claude-haiku-5-5",
   pricePerMillion: { input: 0.1, output: 0.5 },
-  maxOutputTokens: 4_000,
-  timeoutMs: 60_000,
+  maxOutputTokens: 8_000,
+  timeoutMs: 90_000,
 } as const;
 
 /** Which service answers JEV's questions: "openrouter" (the JEV model) or "opengateway" (a chat model). */
