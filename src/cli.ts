@@ -456,6 +456,47 @@ program
     await noteApplied(sent);
   });
 
+/** In the page: the empty, visible box (or first of a row of boxes) that asks for an emailed code, and the button that sends it. */
+const CODE_BOX_SCRIPT = `(() => {
+  const seen = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== "hidden"; };
+  const words = (el) => [el.id, el.name, el.getAttribute("aria-label"), el.getAttribute("autocomplete"), el.placeholder, (el.closest("label, fieldset, form, div") || {}).textContent || ""].join(" ").slice(0, 400);
+  const boxes = [...document.querySelectorAll("input")].filter((i) => seen(i) && ["text", "tel", "number", ""].includes((i.type || "").toLowerCase()) && !i.value && /code|security|verif|one.time|otp|pin/i.test(words(i)));
+  const btn = [...document.querySelectorAll("button, input[type=submit]")].filter(seen).find((b) => /submit|verify|confirm|continue/i.test(b.textContent || b.value || ""));
+  const at = (el) => { if (!el) return null; el.scrollIntoView({ block: "center" }); const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; };
+  const box = at(boxes[0]);
+  return { box, boxes: boxes.length, button: at(btn) };
+})()`;
+
+program
+  .command("code <id> <code>")
+  .description("Type the code a board emailed (a Greenhouse security code) into the job's open form, press its submit button, and record the application once the confirmation shows")
+  .action(async (id: string, code: string) => {
+    if (!/^[A-Za-z0-9]{4,12}$/.test(code)) throw new Error("a code is 4 to 12 letters or digits");
+    const jev = new JevClient();
+    let outcome = "";
+    await inRun("code", async () => {
+      const page = await pageFor(id);
+      try {
+        await page.bringToFront();
+        const at = await page.evaluate<{ box: { x: number; y: number } | null; boxes: number; button: { x: number; y: number } | null }>(CODE_BOX_SCRIPT);
+        if (!at.box) throw new Error("no empty code box is showing on that form");
+        await page.click(at.box.x, at.box.y);
+        await page.type(code);
+        await sleep(800);
+        const again = await page.evaluate<{ button: { x: number; y: number } | null }>(CODE_BOX_SCRIPT);
+        if (again.button) await page.click(again.button.x, again.button.y);
+        else await page.key("Enter");
+        console.log(`Typed the code into ${at.boxes > 1 ? `${at.boxes} boxes` : "the code box"} and pressed ${again.button ? "its button" : "Enter"}.`);
+      } finally {
+        page.close();
+      }
+      const deadline = Date.now() + 90_000;
+      outcome = await resume(jev, id, { stop: () => Date.now() > deadline });
+    });
+    console.log(outcome === "applied" ? "Sent and recorded." : `Not confirmed yet (${outcome}). Look at the form, then run resume ${id}.`);
+    if (outcome === "applied") await noteApplied([id]);
+  });
+
 program
   .command("reconcile [ids...]")
   .description("Settle the forms whose Submit was clicked with no confirmation seen: read what each tab shows now, and record it as applied or as not sent. A form that proves neither stays unconfirmed for you to settle with mark")
