@@ -7,7 +7,8 @@
  */
 import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import { JEV, PATHS } from "../config.js";
+import { JEV, JEV_GATEWAY, jevBackend, PATHS } from "../config.js";
+import { chatBody, toDecision } from "./gateway.js";
 import { DecisionResponse, type Answer, type Questions, type State, type Usage } from "./types.js";
 
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
@@ -46,13 +47,18 @@ export class JevClient {
   private readonly siteName: string | undefined;
   readonly usage: Usage = { calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 };
 
-  constructor(opts: JevClientOptions = {}) {
-    const key = opts.apiKey ?? process.env.OPENROUTER_API_KEY;
-    if (!key) throw new JevError("OPENROUTER_API_KEY is not set. Copy .env.example to .env and add your key.");
+  /** "opengateway" asks a chat model the same questions (src/jev/gateway.ts). */
+  readonly backend: "openrouter" | "opengateway";
+
+  constructor(opts: JevClientOptions & { backend?: "openrouter" | "opengateway" } = {}) {
+    this.backend = opts.backend ?? jevBackend();
+    const gateway = this.backend === "opengateway";
+    const key = opts.apiKey ?? (gateway ? process.env.OPENGATEWAY_API_KEY : process.env.OPENROUTER_API_KEY);
+    if (!key) throw new JevError(gateway ? "OPENGATEWAY_API_KEY is not set. Add it to .env." : "OPENROUTER_API_KEY is not set. Copy .env.example to .env and add your key, or set JEV_BACKEND=opengateway with OPENGATEWAY_API_KEY.");
     this.apiKey = key;
     this.fetchImpl = opts.fetchImpl ?? ((input, init) => fetch(input, init));
-    this.endpoint = opts.endpoint ?? JEV.endpoint;
-    this.model = opts.model ?? JEV.model;
+    this.endpoint = opts.endpoint ?? (gateway ? JEV_GATEWAY.endpoint : JEV.endpoint);
+    this.model = opts.model ?? (gateway ? JEV_GATEWAY.model : JEV.model);
     this.spendCapUsd = opts.spendCapUsd ?? JEV.runSpendCapUsd;
     this.usageLog = opts.usageLog === undefined ? PATHS.jevUsage : opts.usageLog;
     this.siteUrl = opts.siteUrl ?? process.env.OPENROUTER_SITE_URL;
@@ -65,7 +71,8 @@ export class JevClient {
     if (this.usage.costUsd >= this.spendCapUsd) {
       throw new JevError(`JEV spend cap of $${this.spendCapUsd} reached for this run`);
     }
-    const body = JSON.stringify({ model: this.model, state, questions });
+    const gateway = this.backend === "opengateway";
+    const body = gateway ? chatBody(this.model, state, questions) : JSON.stringify({ model: this.model, state, questions });
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.apiKey}`,
       "Content-Type": "application/json",
@@ -77,7 +84,7 @@ export class JevClient {
     for (let attempt = 0; attempt <= JEV.maxRetries; attempt++) {
       if (attempt > 0) await sleep(JEV.retryBaseMs * 2 ** (attempt - 1));
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), JEV.timeoutMs);
+      const timer = setTimeout(() => controller.abort(), gateway ? JEV_GATEWAY.timeoutMs : JEV.timeoutMs);
       try {
         const res = await this.fetchImpl(this.endpoint, { method: "POST", headers, body, signal: controller.signal });
         const text = await res.text();
@@ -86,10 +93,17 @@ export class JevClient {
           continue;
         }
         if (!res.ok) throw new JevError(`JEV ${res.status} on ${label}: ${redact(text)}`, res.status, redact(text));
-        const parsed = DecisionResponse.safeParse(JSON.parse(text));
+        let decoded: unknown;
+        try {
+          decoded = gateway ? toDecision(text, questions) : JSON.parse(text);
+        } catch (e) {
+          // A chat model can slip once; its reply is asked for again like a busy server.
+          throw new JevError(`JEV returned an unreadable reply on ${label}: ${redact(String(e)).slice(0, 200)}`, 502);
+        }
+        const parsed = DecisionResponse.safeParse(decoded);
         if (!parsed.success) throw new JevError(`JEV returned an unexpected shape on ${label}: ${parsed.error.message}`);
         this.record(parsed.data, label);
-        this.assertAllAnswered(questions, parsed.data.answers, label);
+        this.assertAllAnswered(questions, parsed.data.answers, label, gateway ? 502 : undefined);
         return parsed.data.answers;
       } catch (err) {
         if (err instanceof JevError) {
@@ -124,9 +138,9 @@ export class JevClient {
     }
   }
 
-  private assertAllAnswered(questions: Questions, answers: Record<string, Answer>, label: string): void {
+  private assertAllAnswered(questions: Questions, answers: Record<string, Answer>, label: string, retryStatus?: number): void {
     const missing = Object.keys(questions).filter((k) => !(k in answers));
-    if (missing.length) throw new JevError(`JEV left questions unanswered on ${label}: ${missing.join(", ")}`);
+    if (missing.length) throw new JevError(`JEV left questions unanswered on ${label}: ${missing.join(", ")}`, retryStatus);
     for (const [key, q] of Object.entries(questions)) {
       const a = answers[key];
       if (a && a.type !== q.type) throw new JevError(`JEV answered ${key} as ${a.type}, expected ${q.type}`);

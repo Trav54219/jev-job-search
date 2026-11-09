@@ -94,6 +94,26 @@ export function loadEnv(file = path.join(ROOT, ".env")): void {
   }
 }
 
+/**
+ * JEV's questions asked of a chat model through an OpenAI-compatible gateway, for a person with no
+ * OpenRouter key: JEV_BACKEND=opengateway and OPENGATEWAY_API_KEY in .env (src/jev/gateway.ts).
+ * Prices are per million tokens, from the gateway's model list; the gateway reports no cost.
+ */
+export const JEV_GATEWAY = {
+  endpoint: "https://apis.opengateway.ai/v1/chat/completions",
+  model: "anthropic/claude-haiku-5-5",
+  pricePerMillion: { input: 0.1, output: 0.5 },
+  maxOutputTokens: 4_000,
+  timeoutMs: 60_000,
+} as const;
+
+/** Which service answers JEV's questions: "openrouter" (the JEV model) or "opengateway" (a chat model). */
+export function jevBackend(): "openrouter" | "opengateway" {
+  const asked = (process.env.JEV_BACKEND ?? "").trim().toLowerCase();
+  if (asked === "opengateway" || asked === "openrouter") return asked;
+  return !process.env.OPENROUTER_API_KEY && process.env.OPENGATEWAY_API_KEY ? "opengateway" : "openrouter";
+}
+
 export const JEV = {
   endpoint: "https://openrouter.ai/api/alpha/decisions",
   model: "typesafe/jev-1.13",
@@ -242,8 +262,10 @@ export const CACHE = {
 } as const;
 
 export const BROWSER = {
-  /** The Chrome binary the fill runner drives over the DevTools protocol. */
-  chromePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  /** The Chrome binary the fill runner drives over the DevTools protocol. CHROME_PATH in .env points it at another Chrome build (Chrome for Testing, Chromium). */
+  get chromePath(): string {
+    return (process.env.CHROME_PATH ?? "").trim() || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+  },
   /** Local DevTools port of the runner's own Chrome window. */
   port: 9333,
   /** Its profile lives with the other run data, so it is git-ignored and keeps cookies between runs. */

@@ -7,7 +7,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
-import { BROWSER, childEnv, DOCTOR, GMAIL, PATHS, ROOT, WRITER, writerBackend } from "./config.js";
+import { BROWSER, childEnv, DOCTOR, GMAIL, jevBackend, JEV_GATEWAY, PATHS, ROOT, WRITER, writerBackend } from "./config.js";
 import { loadAccounts } from "./accounts/config.js";
 import { defaultStore, type SecretStore } from "./accounts/secrets.js";
 import { loadGmail } from "./mail/gmail.js";
@@ -50,6 +50,10 @@ export function checkClaude(): Check {
 }
 
 export function checkKey(key = process.env.OPENROUTER_API_KEY ?? ""): Check {
+  if (jevBackend() === "opengateway") {
+    const gw = (process.env.OPENGATEWAY_API_KEY ?? "").trim().length > 0;
+    return { name: "Open Gateway key", ok: gw, detail: gw ? `set in .env (JEV questions go to ${JEV_GATEWAY.model})` : "JEV_BACKEND=opengateway but OPENGATEWAY_API_KEY is empty", fix: "Paste the key after OPENGATEWAY_API_KEY= in .env. Do not paste the key into a chat." };
+  }
   const ok = key.trim().length > 0;
   return {
     name: "OpenRouter key",
