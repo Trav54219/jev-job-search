@@ -474,7 +474,9 @@ program
     if (!/^[A-Za-z0-9]{4,12}$/.test(code)) throw new Error("a code is 4 to 12 letters or digits");
     const jev = new JevClient();
     let outcome = "";
-    await inRun("code", async () => {
+    // Only this job's own tab is touched and every record goes through the store lock, so a code can be typed while a batch run holds the browser.
+    await (async () => {
+      await ensureBrowser();
       const page = await pageFor(id);
       try {
         await page.bringToFront();
@@ -492,7 +494,7 @@ program
       }
       const deadline = Date.now() + 90_000;
       outcome = await resume(jev, id, { stop: () => Date.now() > deadline });
-    });
+    })();
     console.log(outcome === "applied" ? "Sent and recorded." : `Not confirmed yet (${outcome}). Look at the form, then run resume ${id}.`);
     if (outcome === "applied") await noteApplied([id]);
   });
