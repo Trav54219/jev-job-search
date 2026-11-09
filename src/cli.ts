@@ -149,7 +149,7 @@ program
 
 // ------------------------------------------------------------------- apply
 
-type ApplyOptions = { count: number; dry?: boolean; submit?: boolean; fresh?: boolean; json?: boolean; tailor?: boolean; cover?: boolean; plain?: boolean; resubmit?: boolean };
+type ApplyOptions = { count: number; rate?: boolean; links?: string; dry?: boolean; submit?: boolean; fresh?: boolean; json?: boolean; tailor?: boolean; cover?: boolean; plain?: boolean; resubmit?: boolean };
 
 /** Takes the browser for a command that drives it, tidies what an interrupted run left, and gives the lock back when the work ends. */
 async function inRun<T>(command: string, work: () => Promise<T>): Promise<T> {
@@ -164,7 +164,7 @@ async function inRun<T>(command: string, work: () => Promise<T>): Promise<T> {
 }
 
 /** A posting's link in place of an id is read, rated and queued first, so `apply <link> --submit` is one step. */
-async function idsFromLinks(given: string[]): Promise<string[]> {
+async function idsFromLinks(given: string[], rate = true): Promise<string[]> {
   const out: string[] = [];
   let jev: JevClient | null = null;
   let skipped = 0;
@@ -173,17 +173,17 @@ async function idsFromLinks(given: string[]): Promise<string[]> {
       out.push(g);
       continue;
     }
-    jev ??= new JevClient();
+    if (rate) jev ??= new JevClient();
     // A link that cannot be read (a closed posting, a board the tool does not read) is named and left out; the rest still run.
     let e: QueueEntry;
     try {
-      e = await addJob(jev, loadProfile(), g);
+      e = await addJob(jev, loadProfile(), g, { rate });
     } catch (err) {
       console.log(`skipped: ${err instanceof Error ? err.message : String(err)}`);
       skipped++;
       continue;
     }
-    console.log(`${e.job.id}  ${e.job.company} | ${e.job.title}  (fit ${e.fit?.score.toFixed(2) ?? "?"})`);
+    console.log(`${e.job.id}  ${e.job.company} | ${e.job.title}  (${e.fit ? `fit ${e.fit.score.toFixed(2)}` : "your pick, not rated"})`);
     // A link to a job that was sent, or may have been, is passed on all the same: takeJobs refuses it and says why.
     out.push(e.job.id);
   }
@@ -209,12 +209,16 @@ program
   .option("--cover", "also write a cover letter for a form that has a box for one, as a file or as text")
   .option("--plain", "the profile's own resume and no cover letter, whatever the profile says")
   .option("--resubmit", "let a job you already applied to be filled and sent again. Never needed in normal use")
+  .option("--links <file>", "a text or CSV file of posting links to apply to, one per line (any https link in a line is taken)")
+  .option("--no-rate", "links you picked yourself: skip the fit rating and apply to every one that can be read")
   .option("--json")
   .action(async (given: string[], o: ApplyOptions) => {
+    if (o.links) given = [...given, ...(readFileSync(o.links, "utf8").match(/https?:\/\/[^\s,"']+/g) ?? [])];
+    if (o.links && o.count === 1) o.count = given.length;
     documentsFromOptions(o);
     const began = new Date().toISOString();
     await inRun(`apply${o.submit ? " --submit" : ""}${o.dry ? " --dry" : ""}`, async () => {
-      const ids = await idsFromLinks(given);
+      const ids = await idsFromLinks(given, o.rate !== false);
       if (given.length && !ids.length) return;
       const entries = takeJobs(ids, { count: o.count, dry: !!o.dry, resubmit: !!o.resubmit });
       if (given.length && !entries.length) return;

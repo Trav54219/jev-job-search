@@ -2,6 +2,7 @@
  * One posting by its link: the way to apply to a job the person found themselves. The posting is
  * read from its board's own API, rated like any other, and put in the queue at the top.
  */
+import { companyExcluded, loadTarget } from "./target.js";
 import { JevClient } from "../jev/client.js";
 import { ashbyJobId, ashbySlug, fetchAshbyBoard } from "../sources/ats/ashby.js";
 import { fetchGreenhouseBoard, greenhouseJobId, greenhouseSlug } from "../sources/ats/greenhouse.js";
@@ -29,7 +30,7 @@ export async function fetchPosting(url: string): Promise<Job | null> {
 }
 
 /** Reads, rates and queues one posting. Returns its queue entry, or throws with the reason it could not be read. */
-export async function addJob(jev: JevClient, profile: Profile, url: string): Promise<QueueEntry> {
+export async function addJob(jev: JevClient | null, profile: Profile, url: string, opts: { rate?: boolean } = {}): Promise<QueueEntry> {
   const job = await fetchPosting(url);
   if (!job) throw new Error(`could not read a posting at ${url}. The tool reads Greenhouse, Lever, Ashby and Workday links; for another board, run discover and apply from the queue.`);
   // A board that wants an account is taken only where the person has one or allowed one.
@@ -37,7 +38,12 @@ export async function addJob(jev: JevClient, profile: Profile, url: string): Pro
   if (account?.verdict === "no") throw new Error(`${job.company} is on Workday, where every employer wants an account, and you have not allowed one. To allow it: npx jev accounts add workday --email you@example.com --create --terms --verify-email`);
   const before = loadQueue().entries.find((e) => e.job.id === job.id);
   if (before && MAYBE_SENT.includes(before.status)) return before;
-  const fit = await rateJob(jev, job, profile);
+  // The person's own skip list holds even when they chose this link themselves.
+  const target = loadTarget();
+  const employer = target ? companyExcluded(job.company, target) : null;
+  if (employer) throw new Error(`${job.company}: ${employer}, so it is not applied to`);
+  // A link the person picked and scored themselves is not rated again: it costs a call and the person's choice stands.
+  const fit = opts.rate === false || !jev ? null : await rateJob(jev, job, profile);
   // Rating took a while, so the entry is merged into the queue as it is now.
   return mutateQueue((q) => {
     const previous = q.entries.find((e) => e.job.id === job.id);
