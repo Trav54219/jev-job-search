@@ -3,7 +3,7 @@
  * might need (speculative fan-out). Code turns the typed answers into a
  * composite score, hard skips, and human-readable reasons.
  */
-import { FIT_WEIGHTS, GRADUATION_MISMATCH_MULTIPLIER, LOCATION_MULTIPLIER, RECENCY_FLOOR, DISCOVER } from "../config.js";
+import { FIT_WEIGHTS, GRADUATION_MISMATCH_MULTIPLIER, LOCATION_MULTIPLIER, RECENCY_FLOOR, DISCOVER, TARGET_LOCATION_MULTIPLIER, TARGET_OTHER_LEVEL_FIT } from "../config.js";
 import type { JevClient } from "../jev/client.js";
 import { choice, noul, score, scoreToUnit } from "../jev/questions.js";
 import type { Answer, ChoiceAnswer, NoulAnswer, Questions, ScoreAnswer } from "../jev/types.js";
@@ -11,6 +11,7 @@ import { monthName, usStatus, type Profile } from "../profile/schema.js";
 import { locationTier, type LocationTier } from "./hardFilters.js";
 import { ageDays, type Job } from "./normalize.js";
 import { hashOf, type KeyedCache } from "../util/cache.js";
+import { loadTarget, rolesLine, type Target } from "./target.js";
 
 const LEVELS5 = ["None", "Weak", "Partial", "Strong", "Near exact"];
 
@@ -26,8 +27,33 @@ function termCriteria(gradMonth: number, gradYear: number): Record<string, strin
   };
 }
 
+/**
+ * The questions for a person with a target (data/target.json): is this one of their roles, at
+ * which level. The internship term, graduation and returning-to-school questions are not asked.
+ */
+export function targetQuestions(t: Target): Questions {
+  const { is_software_role: _sw, term: _term, graduation_excluded: _grad, returning_student_required: _ret, stack_match: _stack, interview_practical: _ip, level: _level, ...rest } = FIT_QUESTIONS;
+  return {
+    ...rest,
+    is_target_role: noul(`Is this posting one of these roles, or the same job under another title: ${rolesLine(t)}?${t.description ? ` The work meant: ${t.description}.` : ""}`, {
+      true: "The day-to-day work is one of those roles, whatever the exact title",
+      false: "A different job that only shares a word with them, or anything else",
+    }),
+    level: choice("What level is this posting?", {
+      internship: "Internship, co-op, student or work term",
+      new_grad: "New grad, early career, entry level, or junior with 0 to 2 years",
+      mid: "Mid level: asks for about 2 to 5 years of experience, or no level stated for an individual role",
+      senior: "Senior, staff, principal, lead, manager, head or director, or 5 or more years",
+      other: "Unclear or not a job posting",
+    }),
+    stack_match: score("How well do the candidate's skills, tools and past work match what the posting asks for?", LEVELS5),
+    interview_practical: noul("Does the posting describe a practical interview process (take-home, work sample, project review, or AI tools permitted) rather than puzzles?"),
+  };
+}
+
 /** Every question for one posting, with the term and graduation wording taken from the profile. */
-export function fitQuestions(profile: Pick<Profile, "education">): Questions {
+export function fitQuestions(profile: Pick<Profile, "education">, target: Target | null = null): Questions {
+  if (target) return targetQuestions(target);
   const edu = profile.education[0];
   const month = edu?.gradMonth ?? 4;
   const year = edu?.gradYear ?? new Date().getUTCFullYear() + 1;
@@ -122,24 +148,24 @@ export function buildFitState(job: Job, profile: Profile, now = new Date()): Rec
  * posting's age is left out. It changes every day, it is not what the questions are about, and
  * the score takes it from the date, not from JEV.
  */
-export function ratingKey(job: Job, profile: Profile): string {
+export function ratingKey(job: Job, profile: Profile, target: Target | null = null): string {
   const state = buildFitState(job, profile, new Date(0)) as { job: Record<string, unknown>; candidate: unknown };
   const { posted_days_ago: _age, ...posting } = state.job;
-  return hashOf({ id: job.id, posting, candidate: state.candidate, questions: fitQuestions(profile) });
+  return hashOf({ id: job.id, posting, candidate: state.candidate, questions: fitQuestions(profile, target) });
 }
 
 /** Rates a posting. With a cache, an unchanged posting gets the answers JEV gave before, and the score is worked out afresh for today. */
-export async function rateJob(jev: JevClient, job: Job, profile: Profile, now = new Date(), cache?: KeyedCache<Record<string, Answer>>): Promise<FitResult> {
-  const key = cache ? ratingKey(job, profile) : "";
+export async function rateJob(jev: JevClient, job: Job, profile: Profile, now = new Date(), cache?: KeyedCache<Record<string, Answer>>, target: Target | null = loadTarget()): Promise<FitResult> {
+  const key = cache ? ratingKey(job, profile, target) : "";
   let answers = cache?.get(key);
   if (!answers) {
-    answers = await jev.decide(buildFitState(job, profile, now), fitQuestions(profile), `rate:${job.company}:${job.title}`);
+    answers = await jev.decide(buildFitState(job, profile, now), fitQuestions(profile, target), `rate:${job.company}:${job.title}`);
     cache?.set(key, answers);
   }
-  return scoreFromAnswers(job, answers, now, usStatus(profile));
+  return scoreFromAnswers(job, answers, now, usStatus(profile), target);
 }
 
-export function scoreFromAnswers(job: Job, answers: Record<string, Answer>, now = new Date(), us: { authorized: boolean; citizen: boolean } = { authorized: false, citizen: false }): FitResult {
+export function scoreFromAnswers(job: Job, answers: Record<string, Answer>, now = new Date(), us: { authorized: boolean; citizen: boolean } = { authorized: false, citizen: false }, target: Target | null = null): FitResult {
   // A rating saved before a question existed simply lacks it; that reads as "no".
   const n = (k: string) => (answers[k] as NoulAnswer | undefined)?.noul ?? 0;
   const c = (k: string) => answers[k] as ChoiceAnswer;
@@ -150,17 +176,27 @@ export function scoreFromAnswers(job: Job, answers: Record<string, Answer>, now 
   const tier: LocationTier = codeTier !== "unclear" ? codeTier : (c("location_tier").choice as LocationTier);
 
   let skipReason: string | null = null;
-  if (n("is_software_role") < 0.5) skipReason = "not a software role";
-  else if (c("level").choice === "experienced" && c("level").confidence >= 0.6) skipReason = "requires professional experience";
-  else if (n("is_unpaid") > 0.7) skipReason = "unpaid";
+  const level: string = c("level")?.choice ?? "other";
+  const levelSure = (c("level")?.confidence ?? 0) >= 0.6;
+  if (target) {
+    if (n("is_target_role") < 0.5) skipReason = `not one of: ${rolesLine(target)}`;
+    else if (target.levels.length && levelSure && level !== "other" && !(target.levels as string[]).includes(level)) skipReason = `${level} level, wanted ${target.levels.join(" or ")}`;
+  } else if (n("is_software_role") < 0.5) skipReason = "not a software role";
+  else if (level === "experienced" && levelSure) skipReason = "requires professional experience";
+  if (skipReason) {
+    // The role or level reason stands.
+  } else if (n("is_unpaid") > 0.7) skipReason = "unpaid";
   else if (n("needs_advanced_degree") > 0.7) skipReason = "advanced degree required";
   else if (c("work_auth").choice === "us_no_sponsorship" && c("work_auth").confidence >= 0.5 && !us.authorized) skipReason = "US role, no sponsorship";
   else if (c("work_auth").choice === "us_citizenship_required" && c("work_auth").confidence >= 0.5 && !us.citizen) skipReason = "US citizenship or clearance required";
   else if (job.ats === "other" && n("needs_account") > 0.9) skipReason = "needs an account to apply";
   else if (n("requires_references") > 0.85) skipReason = "references required";
 
-  const levelFit = { internship: 1, new_grad: 1, experienced: 0.1, other: 0.3 }[c("level").choice] ?? 0.3;
-  const termFit = { summer: 1, new_grad: 1, winter: 0.8, earlier: 0.3, other: 0.5 }[c("term").choice] ?? 0.5;
+  const levelFit = target
+    ? (!target.levels.length || (target.levels as string[]).includes(level) ? 1 : TARGET_OTHER_LEVEL_FIT)
+    : ({ internship: 1, new_grad: 1, experienced: 0.1, other: 0.3 }[level] ?? 0.3);
+  // With a target there is no term to fit: a full-time role starts when it starts.
+  const termFit = target ? 1 : ({ summer: 1, new_grad: 1, winter: 0.8, earlier: 0.3, other: 0.5 }[c("term").choice] ?? 0.5);
   const components = {
     stackMatch: scoreToUnit(s("stack_match").score, LEVELS5.length),
     experienceMatch: scoreToUnit(s("experience_match").score, LEVELS5.length),
@@ -175,7 +211,8 @@ export function scoreFromAnswers(job: Job, answers: Record<string, Answer>, now 
   const recency = age === null ? 0.85 : 1 - (1 - RECENCY_FLOOR) * Math.min(1, age / DISCOVER.maxAgeDays);
   // The candidate may still apply, so a graduation window that excludes them lowers the rank instead of dropping the job.
   const gradExcluded = n("graduation_excluded") > 0.7;
-  const scoreValue = Math.round(base * LOCATION_MULTIPLIER[tier] * recency * (gradExcluded ? GRADUATION_MISMATCH_MULTIPLIER : 1) * 1000) / 1000;
+  const locationWeight = target ? (target.locationWeights[tier] ?? TARGET_LOCATION_MULTIPLIER[tier]) : LOCATION_MULTIPLIER[tier];
+  const scoreValue = Math.round(base * locationWeight * recency * (gradExcluded ? GRADUATION_MISMATCH_MULTIPLIER : 1) * 1000) / 1000;
 
   if (c("work_auth").choice === "us_sponsors" && !us.authorized) reasons.push("US role, sponsorship offered");
   if (c("work_auth").choice === "unclear" && tier === "us" && !us.authorized) reasons.push("US role, sponsorship not stated");

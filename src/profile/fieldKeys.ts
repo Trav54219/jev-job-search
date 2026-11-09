@@ -175,15 +175,18 @@ export function valueFor(profile: Profile, key: ProfileKey): string | null {
   }
 }
 
-/** Whole years of experience across internships and founder roles, rounded down, minimum 0. */
-export function yearsOfExperience(profile: Profile): number {
-  let months = 0;
+/** Whole years of experience across every role, rounded down, minimum 0. Two roles held at once count their shared months once. */
+export function yearsOfExperience(profile: Profile, now = new Date()): number {
+  const worked = new Set<number>();
   for (const e of profile.experience) {
     const start = parseMonth(e.start);
-    const end = e.current ? new Date() : parseMonth(e.end);
-    if (start && end) months += Math.max(0, (end.getFullYear() - start.getFullYear()) * 12 + end.getMonth() - start.getMonth());
+    const end = e.current ? now : parseMonth(e.end);
+    if (!start || !end) continue;
+    const from = start.getFullYear() * 12 + start.getMonth();
+    const to = end.getFullYear() * 12 + end.getMonth();
+    for (let m = from; m < to; m++) worked.add(m);
   }
-  return Math.floor(months / 12);
+  return Math.floor(worked.size / 12);
 }
 
 function parseMonth(s: string): Date | null {

@@ -5,7 +5,7 @@
  * --json so their output can be read by a program.
  */
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
 import { contextFingerprint } from "./answers/resolve.js";
@@ -16,7 +16,8 @@ import { closeJobTab, loadSession, pageFor } from "./browser/session.js";
 import { clearBrowsingData, closeTab, ensureBrowser, listTargets, newTab, Page, sleep } from "./browser/cdp.js";
 import { acquireRun, currentRun } from "./util/store.js";
 import { waitingWords } from "./run/assist.js";
-import { withStore } from "./util/store.js";
+import { withStore, writeAtomic } from "./util/store.js";
+import { LEVELS, loadTarget, TargetSchema, targetPath, titleWords } from "./jobs/target.js";
 import { checkJob } from "./browser/submit.js";
 import { ACCOUNTS, childEnv, DAILY, GMAIL, INBOX, loadEnv, DISCOVER, PATHS, REPORT, RUN } from "./config.js";
 import { accountGate } from "./accounts/capability.js";
@@ -61,12 +62,58 @@ process.stdout.on("error", (err: NodeJS.ErrnoException) => {
   if (err.code === "EPIPE") process.exit(0);
 });
 const program = new Command();
-program.name("jev-job-search").description("Find and rate software jobs with JEV, fill and check each application form in Chrome, and let Claude write what needs writing.").version("1.6.0");
+program.name("jev-job-search").description("Find and rate jobs with JEV (software internships, or any titles set with `target`), fill and check each application form in Chrome, and let Claude write what needs writing.").version("1.6.0");
 
 const int = (v: string) => parseInt(v, 10);
 const whereTheRecordIs = () => `Applications you sent: ${PATHS.applied}\nJobs left for you to do by hand: ${PATHS.manual}\nTake-home assignments to do: ${PATHS.takehome}\nEvery job considered: ${PATHS.applications}`;
 
 // ---------------------------------------------------------------- find jobs
+
+const csvList = (v: string) => v.split(",").map((x) => x.trim()).filter(Boolean);
+
+program
+  .command("target [action]")
+  .description("Which jobs to look for: show (default), set, or clear. Without a target the tool looks for software internships and new-grad roles")
+  .option("--roles <list>", "job titles, comma separated: \"GTM Engineer, Growth Engineer\"", csvList)
+  .option("--description <text>", "one sentence on what the work is, so a title that only sounds right is not taken")
+  .option("--levels <list>", `levels to apply to, comma separated, from ${LEVELS.join(", ")} (empty: all)`, csvList)
+  .option("--keywords <list>", "words a company-board title must contain (default: the words of the roles)", csvList)
+  .option("--exclude <list>", "words that rule a title out, comma separated: \"intern, director\"", csvList)
+  .option("--board <ats:slug:Company...>", "a company board to poll, repeatable: ashby:clay:Clay", (v: string, prev: string[] = []) => [...prev, v])
+  .option("--internship-lists", "also read the software internship lists and boards")
+  .action((action: string | undefined, o: { roles?: string[]; description?: string; levels?: string[]; keywords?: string[]; exclude?: string[]; board?: string[]; internshipLists?: boolean }) => {
+    const file = targetPath();
+    if (!action || action === "show") {
+      const t = loadTarget();
+      if (!t) return console.log(`No target set: looking for software internships and new-grad roles.\nSet one: npx jev target set --roles "GTM Engineer, Growth Engineer"`);
+      console.log(JSON.stringify(t, null, 2));
+      console.log(`\nBoard titles must contain one of: ${titleWords(t).join(", ")}`);
+      return;
+    }
+    if (action === "clear") {
+      if (existsSync(file)) rmSync(file);
+      return console.log("Target cleared: back to software internships and new-grad roles.");
+    }
+    if (action !== "set") throw new Error(`unknown action ${action}: use show, set or clear`);
+    const before = loadTarget();
+    const boards = (o.board ?? []).map((b) => {
+      const [ats, slug, ...company] = b.split(":");
+      if (!ats || !slug || !company.length) throw new Error(`a board is ats:slug:Company, not ${b}`);
+      return { ats, slug, company: company.join(":") };
+    });
+    const next = TargetSchema.parse({
+      ...(before ?? {}),
+      ...(o.roles ? { roles: o.roles } : {}),
+      ...(o.description !== undefined ? { description: o.description } : {}),
+      ...(o.levels ? { levels: o.levels } : {}),
+      ...(o.keywords ? { titleKeywords: o.keywords } : {}),
+      ...(o.exclude ? { excludeTitles: o.exclude } : {}),
+      ...(boards.length ? { boards: [...(before?.boards ?? []), ...boards] } : {}),
+      ...(o.internshipLists ? { internshipLists: true } : {}),
+    });
+    withStore(() => writeAtomic(file, JSON.stringify(next, null, 2) + "\n"));
+    console.log(`Target saved to ${file}:\n${JSON.stringify(next, null, 2)}\n\nRun /discover to search for these roles.`);
+  });
 
 program
   .command("discover")

@@ -13,6 +13,8 @@ export const PATHS = {
   root: ROOT,
   data: path.join(ROOT, "data"),
   profile: path.join(ROOT, "data", "profile.json"),
+  /** The kinds of job wanted (src/jobs/target.ts). Absent: software internships and new-grad roles. */
+  target: path.join(ROOT, "data", "target.json"),
   profileExample: path.join(ROOT, "data", "profile.example.json"),
   /** The style guide for written answers. data/voice.local.md, when present, is the candidate's own and wins over the shipped one. */
   voice: existsSync(path.join(ROOT, "data", "voice.local.md")) ? path.join(ROOT, "data", "voice.local.md") : path.join(ROOT, "data", "voice.md"),
@@ -169,6 +171,19 @@ export const LOCATION_MULTIPLIER = {
   international: 0.6,
   unclear: 0.7,
 } as const;
+
+/** Location weights once data/target.json is set: no place favoured unless the target says so. */
+export const TARGET_LOCATION_MULTIPLIER = {
+  vancouver: 1,
+  canada: 1,
+  remote: 1,
+  us: 1,
+  international: 0.6,
+  unclear: 0.85,
+} as const;
+
+/** Level fit with a target: a level the target names counts fully, any other this much. */
+export const TARGET_OTHER_LEVEL_FIT = 0.3;
 
 /** Applied when the posting asks for a graduation date the candidate does not have. They can still apply, so it ranks lower instead of being dropped. */
 export const GRADUATION_MISMATCH_MULTIPLIER = 0.6;

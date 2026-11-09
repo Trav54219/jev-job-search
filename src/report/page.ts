@@ -135,7 +135,7 @@ ${embedded}
       '<div><label>Most JEV may cost in a day, in dollars (JEV only: Claude is on your subscription or your own key, and is not counted)</label><input type="number" id="pBudget" min="0" step="0.05" value="' + esc(p.jevBudgetUsd) + '"></div>' +
       '<div><label>Lowest fit score, 0 to 1</label><input type="number" id="pScore" min="0" max="1" step="0.05" value="' + esc(p.minScore) + '"></div>' +
       '<div><label>Where: vancouver, canada, remote, us, international (empty: anywhere)</label><input type="text" id="pWhere" value="' + esc(list(p.where)) + '"></div>' +
-      '<div><label>Kinds: internship, new_grad (empty: both)</label><input type="text" id="pLevels" value="' + esc(list(p.levels)) + '"></div>' +
+      '<div><label>Kinds: internship, new_grad, mid, senior (empty: all)</label><input type="text" id="pLevels" value="' + esc(list(p.levels)) + '"></div>' +
       '<div><label>Boards: greenhouse, lever, ashby, workday (empty: all)</label><input type="text" id="pBoards" value="' + esc(list(p.boards)) + '"></div>' +
       '<div><label>Employers never to apply to</label><input type="text" id="pExclude" value="' + esc(list(p.excludeEmployers)) + '"></div>' +
       '<div><label>Documents</label><label><input type="checkbox" id="pTailor"' + (p.documents.tailor ? " checked" : "") + '> A resume written for each job</label><label><input type="checkbox" id="pCover"' + (p.documents.cover ? " checked" : "") + "> A cover letter where a form has a box for one</label></div>" +

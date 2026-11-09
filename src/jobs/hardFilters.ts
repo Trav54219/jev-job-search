@@ -6,6 +6,7 @@
 import { DISCOVER } from "../config.js";
 import { ageDays, type Job } from "./normalize.js";
 import { isWalled } from "./walled.js";
+import { titleExcluded, type Target } from "./target.js";
 
 const NON_SOFTWARE_TITLE =
   /\b(hardware|mechanical|electrical|civil|chemical|aerospace|manufacturing|industrial|process|structural|rf|asic|fpga|pcb|silicon|analog|mixed[- ]signal|product manager|program manager|project manager|technical program|product design|ux|ui designer|graphic|marketing|sales|recruit|finance intern|accounting|legal|hr |human resources|supply chain|operations analyst|business analyst|data scientist|data science|data analyst|quant|trading|research scientist|phd|postdoc|technician|physical|optics|photonics|materials|biomed|clinical|nurse|teacher)\b/i;
@@ -49,6 +50,8 @@ export function preFilter(
   maxAgeDays: number = DISCOVER.maxAgeDays,
   /** True for a job on an account board where the person has an account, or let the tool make one. */
   mayApplyWithAccount: (url: string) => boolean = () => false,
+  /** The person's target. With one, only its own exclusions rule a title out here; JEV judges the role. */
+  target: Target | null = null,
 ): string | null {
   if (job.ats === "workday" && !mayApplyWithAccount(job.url)) return "workday (needs an account per company)";
   if (job.ats === "taleo" || job.ats === "oracle" || job.ats === "successfactors" || job.ats === "icims" || job.ats === "amazon") {
@@ -58,7 +61,10 @@ export function preFilter(
   if ((DISCOVER.unreadableAts as readonly string[]).includes(job.ats)) return `${job.ats} (its form cannot be read yet)`;
   const age = ageDays(job, now);
   if (age !== null && age > maxAgeDays) return `posted ${age} days ago`;
-  if (NON_SOFTWARE_TITLE.test(job.title) && !SOFTWARE_TITLE.test(job.title)) {
+  if (target) {
+    const excluded = titleExcluded(job.title, target);
+    if (excluded) return excluded;
+  } else if (NON_SOFTWARE_TITLE.test(job.title) && !SOFTWARE_TITLE.test(job.title)) {
     return "title is not a software role";
   }
   if (FRENCH_TITLE.test(job.title)) return "non-English posting";

@@ -27,11 +27,12 @@ import { KeyedCache } from "./util/cache.js";
 import { fetchAshbyBoard } from "./sources/ats/ashby.js";
 import { fetchGreenhouseBoard } from "./sources/ats/greenhouse.js";
 import { fetchLeverBoard } from "./sources/ats/lever.js";
-import { boardsFromJobs, type Board } from "./sources/companies.js";
+import { boardsFromJobs, SEED_BOARDS, type Board } from "./sources/companies.js";
 import { fetchReadmeSources } from "./sources/githubReadme.js";
 import { fetchSimplify } from "./sources/simplify.js";
 import { importSheet } from "./sources/sheetImport.js";
 import { mapLimit } from "./util/http.js";
+import { loadTarget, titleWanted, type Target } from "./jobs/target.js";
 
 export const EARLY_CAREER_TITLE = /\b(intern|internship|co-?op|new grad|new graduate|early career|early-career|entry[- ]level|junior|graduate|university|student|campus|associate software|software engineer i\b|engineer i\b|swe i\b)\b/i;
 
@@ -49,6 +50,8 @@ export type DiscoverOptions = {
   gradYear?: number;
   /** Consider postings up to this many days old, for one search. The default is DISCOVER.maxAgeDays. */
   maxAgeDays?: number;
+  /** The person's target (data/target.json). Undefined: read the file. Null: the software-internship default. */
+  target?: Target | null;
 };
 
 export type DiscoverSummary = {
@@ -68,14 +71,17 @@ export type DiscoverSummary = {
 export async function collectJobs(opts: DiscoverOptions = {}): Promise<Job[]> {
   const log = opts.log ?? (() => {});
   const jobs: Job[] = [];
+  const target = opts.target === undefined ? loadTarget() : opts.target;
+  const lists = !target || target.internshipLists;
+  if (target) log(`[sources] target: ${target.roles.join(", ")}${lists ? "" : " (internship lists off)"}`);
 
-  const [simplify, readmes] = await Promise.all([
+  const [simplify, readmes] = lists ? await Promise.all([
     fetchSimplify().catch((e) => {
       log(`[sources] simplify failed: ${String(e)}`);
       return [] as Job[];
     }),
     fetchReadmeSources(),
-  ]);
+  ]) : [[] as Job[], [] as Job[]];
   log(`[sources] simplify ${simplify.length}, github lists ${readmes.length}`);
   jobs.push(...simplify, ...readmes);
 
@@ -92,7 +98,8 @@ export async function collectJobs(opts: DiscoverOptions = {}): Promise<Job[]> {
   }
 
   if (opts.boards !== false) {
-    const boards = boardsFromJobs(jobs);
+    const seeds = target ? [...(lists ? SEED_BOARDS : []), ...target.boards] : SEED_BOARDS;
+    const boards = boardsFromJobs(jobs, seeds);
     log(`[sources] polling ${boards.length} company boards`);
     const results = await mapLimit(boards, DISCOVER.fetchConcurrency, (b: Board) =>
       b.ats === "greenhouse" ? fetchGreenhouseBoard(b.slug, b.company)
@@ -102,11 +109,11 @@ export async function collectJobs(opts: DiscoverOptions = {}): Promise<Job[]> {
     let fromBoards = 0;
     results.forEach((r) => {
       if (!r.ok) return;
-      const early = r.value.filter((j) => isEarlyCareerTitle(j.title, opts.gradYear));
+      const early = r.value.filter((j) => (target ? titleWanted(j.title, target) : isEarlyCareerTitle(j.title, opts.gradYear)));
       fromBoards += early.length;
       jobs.push(...early);
     });
-    log(`[sources] boards contributed ${fromBoards} early-career postings`);
+    log(`[sources] boards contributed ${fromBoards} ${target ? "matching" : "early-career"} postings`);
   }
   return dedupe(jobs);
 }
@@ -173,7 +180,8 @@ export async function discover(profile: Profile, jev: JevClient, opts: DiscoverO
   const prevById = new Map(previous.entries.map((e) => [e.job.id, e]));
 
   const gradYear = profile.education[0]?.gradYear;
-  const all = await collectJobs({ ...opts, ...(gradYear !== undefined ? { gradYear } : {}) });
+  const target = opts.target === undefined ? loadTarget() : opts.target;
+  const all = await collectJobs({ ...opts, target, ...(gradYear !== undefined ? { gradYear } : {}) });
   const learned = learnedWalledHosts();
   const us = usStatus(profile);
   const collected = all.length;
@@ -186,7 +194,7 @@ export async function discover(profile: Profile, jev: JevClient, opts: DiscoverO
   // An account board counts when the person has an account there or allowed one, even if today's limit of new accounts is used up.
   const withAccount = (url: string) => (capabilityFor(url)?.verdict ?? "no") !== "no";
   for (const job of all) {
-    const reason = preFilter(job, now, (url) => isWalled(url, learned), us, opts.maxAgeDays, withAccount);
+    const reason = preFilter(job, now, (url) => isWalled(url, learned), us, opts.maxAgeDays, withAccount, target);
     if (reason) decided.push({ job, fit: null, reason });
     else kept.push(job);
   }
@@ -210,7 +218,7 @@ export async function discover(profile: Profile, jev: JevClient, opts: DiscoverO
   let done = 0;
   const ratings = CACHE.ratings ? new KeyedCache<Record<string, Answer>>(PATHS.ratings) : undefined;
   const rated = await mapLimit(ready, DISCOVER.rateConcurrency, async (j) => {
-    const fit = await rateJob(jev, j, profile, now, ratings);
+    const fit = await rateJob(jev, j, profile, now, ratings, target);
     done++;
     if (done % 25 === 0) log(`[discover] rated ${done}/${ready.length} (spend $${jev.usage.costUsd.toFixed(4)})`);
     return fit;

@@ -14,8 +14,8 @@ export const Policy = z.object({
   target: z.number().int().min(1).max(DAILY.maxTarget).default(DAILY.target),
   /** Where a job may be: vancouver, canada, remote, us, international, unclear. Empty means anywhere the search kept. */
   where: z.array(z.enum(["vancouver", "canada", "remote", "us", "international", "unclear"])).default([]),
-  /** Which kinds of job: internship, new_grad. Empty means both. */
-  levels: z.array(z.enum(["internship", "new_grad"])).default([]),
+  /** Which kinds of job: internship, new_grad, mid, senior (the last two with data/target.json). Empty means all. */
+  levels: z.array(z.enum(["internship", "new_grad", "mid", "senior"])).default([]),
   /** The lowest fit score a job may have. */
   minScore: z.number().min(0).max(1).default(DISCOVER.applyThreshold),
   /** Which job boards, by the name in the queue: greenhouse, lever, ashby, workday and so on. Empty means every board the tool fills. */
