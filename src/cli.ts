@@ -457,14 +457,25 @@ program
   });
 
 /** In the page: the empty, visible box (or first of a row of boxes) that asks for an emailed code, and the button that sends it. */
-const CODE_BOX_SCRIPT = `(() => {
-  const seen = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== "hidden"; };
-  const words = (el) => [el.id, el.name, el.getAttribute("aria-label"), el.getAttribute("autocomplete"), el.placeholder, (el.closest("label, fieldset, form, div") || {}).textContent || ""].join(" ").slice(0, 400);
-  const boxes = [...document.querySelectorAll("input")].filter((i) => seen(i) && ["text", "tel", "number", ""].includes((i.type || "").toLowerCase()) && !i.value && /code|security|verif|one.time|otp|pin/i.test(words(i)));
-  const btn = [...document.querySelectorAll("button, input[type=submit]")].filter(seen).find((b) => /submit|verify|confirm|continue/i.test(b.textContent || b.value || ""));
-  const at = (el) => { if (!el) return null; el.scrollIntoView({ block: "center" }); const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; };
-  const box = at(boxes[0]);
-  return { box, boxes: boxes.length, button: at(btn) };
+/** In the page: the empty, visible code boxes, in order (one box, or a row of one-character boxes). */
+const CODE_BOXES = `[...document.querySelectorAll("input")].filter((i) => { const r = i.getBoundingClientRect(); const words = [i.id, i.name, i.getAttribute("aria-label"), i.getAttribute("autocomplete"), i.placeholder, (i.closest("label, fieldset, form, div") || {}).textContent || ""].join(" ").slice(0, 400); return r.width > 0 && r.height > 0 && ["text", "tel", "number", ""].includes((i.type || "").toLowerCase()) && /code|security|verif|one.time|otp|pin/i.test(words); })`;
+
+/**
+ * Writes the code into the boxes the way a person's typing would land: the page's own value setter,
+ * then input and change events, one character per box when the boxes take one each. Then presses the
+ * submit button. Done inside the page, so it works whichever tab is in front.
+ */
+const fillCodeScript = (code: string) => `(() => {
+  const boxes = ${CODE_BOXES};
+  if (!boxes.length) return { boxes: 0, filled: "", pressed: false };
+  const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+  const one = boxes.length > 1 && boxes.every((b) => b.maxLength === 1);
+  const parts = one ? ${JSON.stringify(code)}.split("") : [${JSON.stringify(code)}];
+  parts.forEach((ch, i) => { const b = boxes[i]; if (!b) return; b.focus(); set.call(b, ch); b.dispatchEvent(new Event("input", { bubbles: true })); b.dispatchEvent(new Event("change", { bubbles: true })); });
+  const filled = boxes.map((b) => b.value).join("");
+  const btn = [...document.querySelectorAll("button, input[type=submit]")].filter((b) => b.getBoundingClientRect().width > 0).find((b) => /submit|verify|confirm|continue/i.test(b.textContent || b.value || ""));
+  if (filled === ${JSON.stringify(code)} && btn) btn.click();
+  return { boxes: boxes.length, filled, pressed: filled === ${JSON.stringify(code)} && !!btn };
 })()`;
 
 program
@@ -479,16 +490,10 @@ program
       await ensureBrowser();
       const page = await pageFor(id);
       try {
-        await page.bringToFront();
-        const at = await page.evaluate<{ box: { x: number; y: number } | null; boxes: number; button: { x: number; y: number } | null }>(CODE_BOX_SCRIPT);
-        if (!at.box) throw new Error("no empty code box is showing on that form");
-        await page.click(at.box.x, at.box.y);
-        await page.type(code);
-        await sleep(800);
-        const again = await page.evaluate<{ button: { x: number; y: number } | null }>(CODE_BOX_SCRIPT);
-        if (again.button) await page.click(again.button.x, again.button.y);
-        else await page.key("Enter");
-        console.log(`Typed the code into ${at.boxes > 1 ? `${at.boxes} boxes` : "the code box"} and pressed ${again.button ? "its button" : "Enter"}.`);
+        const r = await page.evaluate<{ boxes: number; filled: string; pressed: boolean }>(fillCodeScript(code));
+        if (!r.boxes) throw new Error("no code box is showing on that form");
+        if (!r.pressed) throw new Error(`the code did not land in the boxes (they show "${r.filled}"); type it on the form by hand`);
+        console.log(`Put the code in ${r.boxes > 1 ? `${r.boxes} boxes` : "the code box"} and pressed submit.`);
       } finally {
         page.close();
       }
