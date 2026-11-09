@@ -135,3 +135,15 @@ describe("yearsOfExperience", () => {
     expect(yearsOfExperience(p([{ start: "2020-01", end: "2021-01" }, { start: "2022-01", end: "2023-07" }]))).toBe(2);
   });
 });
+
+describe("excluded employers", () => {
+  it("skips an employer the person is already in process with, by list and by single link", async () => {
+    const { companyExcluded } = await import("../src/jobs/target.js");
+    const t = TargetSchema.parse({ roles: ["GTM Engineer"], excludeCompanies: ["Equi", "Vega"] });
+    expect(companyExcluded("Equi", t)).toMatch(/Equi/);
+    expect(companyExcluded("Equinix", t)).toBeNull();
+    expect(companyExcluded("Vega Claims", t)).toMatch(/Vega/);
+    expect(preFilter(job({ company: "Equi" }), now, () => false, citizen, 14, () => false, t)).toMatch(/already in process/);
+    expect(scoreFromAnswers(job({ company: "Vega" }), answers(), now, citizen, t).skipReason).toMatch(/already in process/);
+  });
+});

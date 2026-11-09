@@ -11,7 +11,7 @@ import { monthName, usStatus, type Profile } from "../profile/schema.js";
 import { locationTier, type LocationTier } from "./hardFilters.js";
 import { ageDays, type Job } from "./normalize.js";
 import { hashOf, type KeyedCache } from "../util/cache.js";
-import { loadTarget, rolesLine, type Target } from "./target.js";
+import { companyExcluded, loadTarget, rolesLine, type Target } from "./target.js";
 
 const LEVELS5 = ["None", "Weak", "Partial", "Strong", "Near exact"];
 
@@ -179,7 +179,9 @@ export function scoreFromAnswers(job: Job, answers: Record<string, Answer>, now 
   const level: string = c("level")?.choice ?? "other";
   const levelSure = (c("level")?.confidence ?? 0) >= 0.6;
   if (target) {
-    if (n("is_target_role") < 0.5) skipReason = `not one of: ${rolesLine(target)}`;
+    const employer = companyExcluded(job.company, target);
+    if (employer) skipReason = employer;
+    else if (n("is_target_role") < 0.5) skipReason = `not one of: ${rolesLine(target)}`;
     else if (target.levels.length && levelSure && level !== "other" && !(target.levels as string[]).includes(level)) skipReason = `${level} level, wanted ${target.levels.join(" or ")}`;
   } else if (n("is_software_role") < 0.5) skipReason = "not a software role";
   else if (level === "experienced" && levelSure) skipReason = "requires professional experience";

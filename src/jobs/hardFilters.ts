@@ -6,7 +6,7 @@
 import { DISCOVER } from "../config.js";
 import { ageDays, type Job } from "./normalize.js";
 import { isWalled } from "./walled.js";
-import { titleExcluded, type Target } from "./target.js";
+import { companyExcluded, titleExcluded, type Target } from "./target.js";
 
 const NON_SOFTWARE_TITLE =
   /\b(hardware|mechanical|electrical|civil|chemical|aerospace|manufacturing|industrial|process|structural|rf|asic|fpga|pcb|silicon|analog|mixed[- ]signal|product manager|program manager|project manager|technical program|product design|ux|ui designer|graphic|marketing|sales|recruit|finance intern|accounting|legal|hr |human resources|supply chain|operations analyst|business analyst|data scientist|data science|data analyst|quant|trading|research scientist|phd|postdoc|technician|physical|optics|photonics|materials|biomed|clinical|nurse|teacher)\b/i;
@@ -62,6 +62,8 @@ export function preFilter(
   const age = ageDays(job, now);
   if (age !== null && age > maxAgeDays) return `posted ${age} days ago`;
   if (target) {
+    const employer = companyExcluded(job.company, target);
+    if (employer) return employer;
     const excluded = titleExcluded(job.title, target);
     if (excluded) return excluded;
   } else if (NON_SOFTWARE_TITLE.test(job.title) && !SOFTWARE_TITLE.test(job.title)) {

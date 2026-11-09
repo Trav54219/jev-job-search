@@ -30,6 +30,8 @@ export const TargetSchema = z.object({
   excludeTitles: z.array(z.string().min(2)).default([]),
   /** Which levels to apply to. Empty means every level. */
   levels: z.array(z.enum(LEVELS)).default([]),
+  /** Employers never applied to (already interviewing, already applied elsewhere). Matched on the company name, ignoring case. */
+  excludeCompanies: z.array(z.string().min(2)).default([]),
   /** Company boards to poll for these roles, on top of the boards the imported lists point at. */
   boards: z.array(z.object({ ats: z.enum(["greenhouse", "lever", "ashby"]), slug: z.string().min(1), company: z.string().min(1) })).default([]),
   /** Also read the software internship lists and the built-in software boards. Off by default once a target is set. */
@@ -81,6 +83,16 @@ export function titleExcluded(title: string, t: Target): string | null {
   const not = wordRegex(t.excludeTitles);
   const m = not?.exec(title);
   return m ? `title says "${m[2]}"` : null;
+}
+
+/** The reason an employer is ruled out by the person's own list, or null. */
+export function companyExcluded(company: string, t: Target): string | null {
+  const c = company.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const hit = t.excludeCompanies.find((x) => {
+    const w = x.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    return w && (c === w || c.startsWith(`${w} `) || c.endsWith(` ${w}`));
+  });
+  return hit ? `already in process with ${hit}` : null;
 }
 
 /** The roles as one line for a question. */

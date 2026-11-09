@@ -79,9 +79,10 @@ program
   .option("--levels <list>", `levels to apply to, comma separated, from ${LEVELS.join(", ")} (empty: all)`, csvList)
   .option("--keywords <list>", "words a company-board title must contain (default: the words of the roles)", csvList)
   .option("--exclude <list>", "words that rule a title out, comma separated: \"intern, director\"", csvList)
+  .option("--skip-companies <list>", "employers never to apply to, comma separated; adds to the saved list", csvList)
   .option("--board <ats:slug:Company...>", "a company board to poll, repeatable: ashby:clay:Clay", (v: string, prev: string[] = []) => [...prev, v])
   .option("--internship-lists", "also read the software internship lists and boards")
-  .action((action: string | undefined, o: { roles?: string[]; description?: string; levels?: string[]; keywords?: string[]; exclude?: string[]; board?: string[]; internshipLists?: boolean }) => {
+  .action((action: string | undefined, o: { roles?: string[]; description?: string; levels?: string[]; keywords?: string[]; exclude?: string[]; skipCompanies?: string[]; board?: string[]; internshipLists?: boolean }) => {
     const file = targetPath();
     if (!action || action === "show") {
       const t = loadTarget();
@@ -108,6 +109,7 @@ program
       ...(o.levels ? { levels: o.levels } : {}),
       ...(o.keywords ? { titleKeywords: o.keywords } : {}),
       ...(o.exclude ? { excludeTitles: o.exclude } : {}),
+      ...(o.skipCompanies ? { excludeCompanies: [...new Set([...(before?.excludeCompanies ?? []), ...o.skipCompanies])] } : {}),
       ...(boards.length ? { boards: [...(before?.boards ?? []), ...boards] } : {}),
       ...(o.internshipLists ? { internshipLists: true } : {}),
     });
