@@ -107,10 +107,24 @@ export const JEV_GATEWAY = {
   timeoutMs: 90_000,
 } as const;
 
-/** Which service answers JEV's questions: "openrouter" (the JEV model) or "opengateway" (a chat model). */
-export function jevBackend(): "openrouter" | "opengateway" {
+/**
+ * JEV's questions asked of Claude Code on the person's own subscription (JEV_BACKEND=claude-code), so a
+ * run spends no API credit. Slower than a gateway call, so a call that fails here goes to Open Gateway
+ * when OPENGATEWAY_API_KEY is set (`fallback`), and otherwise fails like any JEV call.
+ */
+export const JEV_CLAUDE = {
+  model: "haiku",
+  timeoutMs: 150_000,
+  /** Tries on Claude Code before the fallback takes the call. */
+  attempts: 2,
+} as const;
+
+export type JevBackend = "openrouter" | "opengateway" | "claude-code";
+
+/** Which service answers JEV's questions: "openrouter" (the JEV model), "opengateway" (a chat model) or "claude-code" (the subscription). */
+export function jevBackend(): JevBackend {
   const asked = (process.env.JEV_BACKEND ?? "").trim().toLowerCase();
-  if (asked === "opengateway" || asked === "openrouter") return asked;
+  if (asked === "opengateway" || asked === "openrouter" || asked === "claude-code") return asked;
   return !process.env.OPENROUTER_API_KEY && process.env.OPENGATEWAY_API_KEY ? "opengateway" : "openrouter";
 }
 

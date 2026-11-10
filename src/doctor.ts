@@ -50,6 +50,10 @@ export function checkClaude(): Check {
 }
 
 export function checkKey(key = process.env.OPENROUTER_API_KEY ?? ""): Check {
+  if (jevBackend() === "claude-code") {
+    const gw = (process.env.OPENGATEWAY_API_KEY ?? "").trim().length > 0;
+    return { name: "JEV on Claude Code", ok: true, detail: `JEV questions go to Claude Code on your subscription, no API credit${gw ? `; Open Gateway (${JEV_GATEWAY.model}) takes a call Claude Code fails` : "; no fallback key set"}`, fix: "" };
+  }
   if (jevBackend() === "opengateway") {
     const gw = (process.env.OPENGATEWAY_API_KEY ?? "").trim().length > 0;
     return { name: "Open Gateway key", ok: gw, detail: gw ? `set in .env (JEV questions go to ${JEV_GATEWAY.model})` : "JEV_BACKEND=opengateway but OPENGATEWAY_API_KEY is empty", fix: "Paste the key after OPENGATEWAY_API_KEY= in .env. Do not paste the key into a chat." };

@@ -23,7 +23,7 @@ function readRaw(v: unknown): Raw | undefined {
   return out;
 }
 
-const SYSTEM = [
+export const SYSTEM = [
   "You answer typed questions about a STATE (a job posting, a form, a page, a candidate) with calibrated probabilities.",
   "Use only what the STATE says. Never assume a fact about the candidate that the STATE does not give.",
   "Reply with one JSON object and nothing else. It has one key per question, the same keys you were given.",

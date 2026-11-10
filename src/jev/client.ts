@@ -7,7 +7,8 @@
  */
 import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import { JEV, JEV_GATEWAY, jevBackend, PATHS } from "../config.js";
+import { JEV, JEV_CLAUDE, JEV_GATEWAY, jevBackend, PATHS, type JevBackend } from "../config.js";
+import { claudeDecision, runClaude, type ClaudeRunner } from "./claudeCode.js";
 import { chatBody, toDecision } from "./gateway.js";
 import { DecisionResponse, type Answer, type Questions, type State, type Usage } from "./types.js";
 
@@ -23,6 +24,8 @@ export type JevClientOptions = {
   usageLog?: string | null;
   siteUrl?: string;
   siteName?: string;
+  /** For JEV_BACKEND=claude-code: how a prompt reaches Claude Code. Replaceable in a test. */
+  claudeRunner?: ClaudeRunner;
 };
 
 export class JevError extends Error {
@@ -38,6 +41,9 @@ export class JevError extends Error {
 
 export class JevClient {
   private readonly apiKey: string;
+  /** With claude-code: the Open Gateway key a failed call falls back to, or "" for none. */
+  private readonly fallbackKey: string;
+  private readonly claudeRunner: ClaudeRunner;
   private readonly fetchImpl: FetchLike;
   private readonly endpoint: string;
   private readonly model: string;
@@ -47,13 +53,17 @@ export class JevClient {
   private readonly siteName: string | undefined;
   readonly usage: Usage = { calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 };
 
-  /** "opengateway" asks a chat model the same questions (src/jev/gateway.ts). */
-  readonly backend: "openrouter" | "opengateway";
+  /** "opengateway" asks a chat model the same questions (src/jev/gateway.ts); "claude-code" asks Claude Code on the subscription (src/jev/claudeCode.ts). */
+  readonly backend: JevBackend;
 
-  constructor(opts: JevClientOptions & { backend?: "openrouter" | "opengateway" } = {}) {
+  constructor(opts: JevClientOptions & { backend?: JevBackend } = {}) {
     this.backend = opts.backend ?? jevBackend();
-    const gateway = this.backend === "opengateway";
-    const key = opts.apiKey ?? (gateway ? process.env.OPENGATEWAY_API_KEY : process.env.OPENROUTER_API_KEY);
+    this.claudeRunner = opts.claudeRunner ?? runClaude;
+    const viaClaude = this.backend === "claude-code";
+    // Claude Code needs no key; its fallback is the Open Gateway key when there is one.
+    this.fallbackKey = viaClaude ? (opts.apiKey ?? process.env.OPENGATEWAY_API_KEY ?? "").trim() : "";
+    const gateway = this.backend === "opengateway" || viaClaude;
+    const key = viaClaude ? this.fallbackKey || "none" : opts.apiKey ?? (gateway ? process.env.OPENGATEWAY_API_KEY : process.env.OPENROUTER_API_KEY);
     if (!key) throw new JevError(gateway ? "OPENGATEWAY_API_KEY is not set. Add it to .env." : "OPENROUTER_API_KEY is not set. Copy .env.example to .env and add your key, or set JEV_BACKEND=opengateway with OPENGATEWAY_API_KEY.");
     this.apiKey = key;
     this.fetchImpl = opts.fetchImpl ?? ((input, init) => fetch(input, init));
@@ -71,7 +81,30 @@ export class JevClient {
     if (this.usage.costUsd >= this.spendCapUsd) {
       throw new JevError(`JEV spend cap of $${this.spendCapUsd} reached for this run`);
     }
-    const gateway = this.backend === "opengateway";
+    if (this.backend === "claude-code") return this.decideByClaude(state, questions, label);
+    return this.decideOverHttp(state, questions, label);
+  }
+
+  /** Claude Code first; when it fails every try, Open Gateway takes the call if a key is set. */
+  private async decideByClaude(state: State, questions: Questions, label: string): Promise<Record<string, Answer>> {
+    let last: unknown;
+    for (let attempt = 0; attempt < JEV_CLAUDE.attempts; attempt++) {
+      try {
+        const parsed = DecisionResponse.safeParse(await claudeDecision(state, questions, this.claudeRunner));
+        if (!parsed.success) throw new JevError(`Claude Code returned an unexpected shape on ${label}: ${parsed.error.message}`);
+        this.assertAllAnswered(questions, parsed.data.answers, label, 502);
+        this.record(parsed.data, label);
+        return parsed.data.answers;
+      } catch (err) {
+        last = err;
+      }
+    }
+    if (this.fallbackKey) return this.decideOverHttp(state, questions, `${label} (Open Gateway fallback)`);
+    throw last instanceof JevError ? last : new JevError(`Claude Code failed on ${label}: ${redact(String(last))}`);
+  }
+
+  private async decideOverHttp(state: State, questions: Questions, label: string): Promise<Record<string, Answer>> {
+    const gateway = this.backend !== "openrouter";
     const body = gateway ? chatBody(this.model, state, questions) : JSON.stringify({ model: this.model, state, questions });
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.apiKey}`,
