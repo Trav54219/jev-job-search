@@ -413,7 +413,7 @@ async function mapFormFresh(jev: JevClient, profile: Profile, job: Job, dump: Fi
     // The one transcript on file is the undergraduate one unless the profile holds a graduate degree.
     const graduate = profile.education.some((e) => /master|\bm\.?sc?\b|\bmba\b|ph\.?d|doctor/i.test(e.degree));
     const file =
-      want === "resume" ? (policy.resume && docs ? docs.resume : profile.resume.path)
+      want === "resume" ? (policy.resume && docs ? docs.resume : resumeFor(profile, job.title))
       : want === "cover" ? (policy.cover && docs?.cover ? docs.cover : null)
       : want === "transcript" || (want === "graduate_transcript" && graduate) ? (profile.transcript?.path ?? null)
       : null;
@@ -421,7 +421,7 @@ async function mapFormFresh(jev: JevClient, profile: Profile, job: Job, dump: Fi
       id: f.id, selector: f.selector, kind: f.kind, label: f.label, required: f.required,
       action: file ? "upload" : "skip", key: want === "resume" ? "resume_upload" : "leave_blank",
       value: file, optionLabel: null, confidence: 1,
-      note: file ? (want === "resume" && file !== profile.resume.path ? "the resume written for this job" : want === "cover" ? "the cover letter written for this job" : null) : want === "autofill" ? "autofill helper, skipped so it does not overwrite the plan" : want === "transcript" ? "asks for a transcript. Set transcript.path in your profile to attach one" : want === "graduate_transcript" ? "asks for a graduate transcript, and the profile has no graduate degree" : want === "cover" ? "asks for a cover letter. Run apply --cover to write one" : "not a resume upload",
+      note: file ? (want === "resume" && file !== resumeFor(profile, job.title) ? "the resume written for this job" : want === "resume" && file !== profile.resume.path ? `the ${profile.resume.variants.find((v) => v.path === file)?.name ?? "matching"} version of the resume` : want === "cover" ? "the cover letter written for this job" : null) : want === "autofill" ? "autofill helper, skipped so it does not overwrite the plan" : want === "transcript" ? "asks for a transcript. Set transcript.path in your profile to attach one" : want === "graduate_transcript" ? "asks for a graduate transcript, and the profile has no graduate degree" : want === "cover" ? "asks for a cover letter. Run apply --cover to write one" : "not a resume upload",
     });
   });
   const ordered = dump.fields.map((f) => planned.find((p) => p.id === f.id) as PlannedField);
@@ -608,6 +608,18 @@ export function salaryFor(profile: Profile, job: Job): string | null {
   const posted = postedPayRange(job.description ?? "");
   if (posted) return `${usd(posted.low)} to ${usd(posted.high)}`;
   return profile.preferences.salaryExpectation || null;
+}
+
+/** The resume version for a job title: the first variant whose pattern matches, else the main resume. */
+export function resumeFor(profile: Profile, title: string): string {
+  for (const v of profile.resume.variants ?? []) {
+    try {
+      if (new RegExp(v.titles, "i").test(title)) return v.path;
+    } catch {
+      /* a broken pattern is skipped, never fatal */
+    }
+  }
+  return profile.resume.path;
 }
 
 /** Profile value for a key, with the two job-dependent keys resolved against the posting's country. */

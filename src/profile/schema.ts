@@ -133,6 +133,12 @@ export const ProfileSchema = z.object({
     /** Absolute path on the machine that runs the browser. */
     path: z.string(),
     filename: z.string(),
+    /**
+     * Other versions of the same resume, one per kind of role: the first whose `titles` pattern
+     * (a case-blind regular expression) matches the job title is uploaded instead of `path`.
+     * Same facts, different order; a job no pattern matches gets `path`.
+     */
+    variants: z.array(z.object({ name: z.string(), titles: z.string().min(2), path: z.string() })).default([]),
   }),
   /** An academic transcript, attached only to a file box that asks for one. Leave it out and such a form is held for you. */
   transcript: z.object({ path: z.string() }).optional(),
